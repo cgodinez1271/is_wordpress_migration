@@ -1,0 +1,322 @@
+<?php
+/**
+ * @file
+ * Installation and removal.
+ */
+
+/**
+ * Implements hook_disable().
+ */
+function ew_wordpress_migrate_disable() {
+  Migration::deregisterMigration('EwWpAuthor');
+  Migration::deregisterMigration('EwWpImage');
+  Migration::deregisterMigration('EwWpPost');
+  Migration::deregisterMigration('EwWpRecapShow');
+  Migration::deregisterMigration('EwWpRecapShowSeason');
+  Migration::deregisterMigration('EwWpTag');
+  Migration::deregisterMigration('EwWpCategory');
+  Migration::deregisterMigration('EwWpTaxonomyRule');
+  Migration::deregisterMigration('HotfixWPImage');
+}
+
+/**
+ * Schema for temporary tables to facilitate migration.
+ */
+function ew_wordpress_migrate_schema() {
+  $schema = array();
+  $schema['recap_seasons'] = array(
+    'description' => 'Recap Seasons',
+    'fields' => array(
+      'season_id' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'description' => 'Season ID',
+      ),
+      'season_number' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'description' => 'Season Number',
+      ),
+      'nid_creative_work' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'description' => 'Creative Work NID',
+      ),
+    ),
+    'primary key' => array('season_id'),
+  );
+
+  $schema['migration_taxonomy_rules'] = array(
+    'description' => 'Rules for taxonomy migration',
+    'fields' => array(
+      'id' => array(
+        'description' => 'The rule identifier.',
+        'type' => 'serial',
+        'not null' => TRUE,
+        'unsigned' => TRUE,
+      ),
+      'field_legacy_id' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+      ),
+      'blog_name' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+      ),
+      'source_type' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+      ),
+      'source_term' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+      ),
+      'rename_term' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'ignore_term' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+        'not null' => TRUE,
+      ),
+      'person' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+        'not null' => TRUE,
+      ),
+      'movie' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+        'not null' => TRUE,
+      ),
+      'tv' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+        'not null' => TRUE,
+      ),
+      'book' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+        'not null' => TRUE,
+      ),
+      'music' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+        'not null' => TRUE,
+      ),
+      'stage' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+        'not null' => TRUE,
+      ),
+      'web_series' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+        'not null' => TRUE,
+      ),
+      'video_game' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+        'not null' => TRUE,
+      ),
+      'taxonomy_genre' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+        'not null' => TRUE,
+      ),
+      'taxonomy_ew_franchise' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+        'not null' => TRUE,
+      ),
+      'taxonomy_franchise' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+        'not null' => TRUE,
+      ),
+      'taxonomy_event' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+        'not null' => TRUE,
+      ),
+      'taxonomy_freeform' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+        'not null' => TRUE,
+      ),
+      'taxonomy_category' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+        'not null' => TRUE,
+      ),
+    ),
+    'primary key' => array('id'),
+  );
+
+  return $schema;
+}
+
+/**
+ * Create taxonomy migration rules table.
+ */
+function ew_wordpress_migrate_update_7100() {
+  $schema = ew_wordpress_migrate_schema();
+  $table = 'migration_taxonomy_rules';
+  if (db_table_exists($table)) {
+    return t('@table table already exists.', array(
+      '@table' => $table,
+    ));
+  }
+  db_create_table($table, $schema[$table]);
+  return t('Created @table table.', array(
+    '@table' => $table,
+  ));
+}
+
+/**
+ * Adjust migration_taxonomy_rules to include additional columns for new rules.
+ */
+function ew_wordpress_migrate_update_7101() {
+  // Remove deprecated column.
+  db_drop_field('migration_taxonomy_rules', 'taxonomy_vocabulary');
+
+  // New columns.
+  $spec = array(
+    'type' => 'int',
+    'size' => 'tiny',
+    'default' => 0,
+    'not null' => TRUE,
+  );
+  $new_columns = array(
+    'web_series',
+    'video_game',
+    'taxonomy_genre',
+    'taxonomy_ew_franchise',
+    'taxonomy_franchise',
+    'taxonomy_event',
+    'taxonomy_freeform',
+    'taxonomy_category',
+  );
+  foreach ($new_columns as $field) {
+    db_add_field('migration_taxonomy_rules', $field, $spec);
+  }
+}
+
+/**
+ * Get rid of deprecated migrations.
+ */
+function ew_wordpress_migrate_update_7102() {
+  $migrations = array(
+    'EwWpRecapShowTout',
+    'EwWpRecapTout',
+  );
+  foreach ($migrations as $migration) {
+    db_query('DELETE FROM {migrate_log} WHERE machine_name = :migration', array(
+      ':migration' => $migration,
+    ));
+    db_query('DELETE FROM {migrate_status} WHERE machine_name = :migration', array(
+      ':migration' => $migration,
+    ));
+    db_query('DROP TABLE IF EXISTS migrate_map_' . strtolower($migration));
+    db_query('DROP TABLE IF EXISTS migrate_message_' . strtolower($migration));
+  }
+}
+
+/**
+ * Move images with wrong dates.
+ */
+function ew_wordpress_migrate_update_7103() {
+  // Fix applied to production.
+}
+
+/**
+ * Move images with wrong dates with a different pattern.
+ */
+function ew_wordpress_migrate_update_7104() {
+  $sql_query = 'SELECT {node}.nid, {field_data_field_legacy_url}.field_legacy_url_value ';
+  $sql_query .= 'FROM {field_data_field_legacy_url} ';
+  $sql_query .= 'JOIN {node} ON {node}.nid = {field_data_field_legacy_url}.entity_id ';
+  $sql_query .= 'WHERE {node}.changed > UNIX_TIMESTAMP() ';
+  $sql_query .= 'AND {node}.type = :type ';
+  $sql_query .= 'AND {node}.status = 1 ';
+
+  $result = db_query($sql_query, array(':type' => 'image'));
+
+  foreach ($result as $row) {
+    $node = node_load($row->nid);
+    $wrapper = entity_metadata_wrapper('node', $node);
+    $field_image = $wrapper->field_image->value();
+    $file = file_load($field_image['fid']);
+
+    $legacy_url_parsed = parse_url($row->field_legacy_url_value);
+    $path_exploded = explode('/', $legacy_url_parsed['path']);
+    $path_length = count($path_exploded);
+    $date_index = $path_length - 3;
+
+    $year = '20' . substr($path_exploded[$date_index], 0, 2);
+    $month = substr($path_exploded[$date_index], 2, 2);
+    $day = substr($path_exploded[$date_index], 4, 2);
+
+    // Check if date parts are numeric.
+    if (!is_numeric($year) || !is_numeric(($month)) || !is_numeric($day)) {
+      watchdog('ew_wordpress_migrate', 'Unable to determine date of NID #' . $row->nid);
+      continue;
+    }
+
+    $target_dir = "public://i/$year/$month/$day";
+    $updated = strtotime("$year/$month/$day");
+
+    // Check for future date.
+    if ($updated > time()) {
+      watchdog('ew_wordpress_migrate', 'Parsed date was in the future for NID #' . $row->nid);
+      continue;
+    }
+
+    // Check for dates earlier than 1990.
+    if ($updated < 631152000) {
+      watchdog('ew_wordpress_migrate', 'Parsed date was in the past for NID #' . $row->nid);
+      continue;
+    }
+
+    $target_uri = "$target_dir/{$field_image['filename']}";
+
+    // Ensure directory exists and move file.
+    file_prepare_directory($target_dir, FILE_CREATE_DIRECTORY || FILE_MODIFY_PERMISSIONS);
+    $result = file_move($file, $target_uri, FILE_EXISTS_REPLACE);
+
+    // Verify move succeeded.
+    if (!$result) {
+      watchdog('ew_wordpress_migrate', 'Unable to move NID #' . $row->nid);
+      continue;
+    }
+
+    // Update modification date on node.
+    $node->updated = $updated;
+    node_save($node);
+  }
+}

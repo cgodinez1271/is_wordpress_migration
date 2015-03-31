@@ -1,0 +1,16 @@
+name = IS.com WordPress Migrate
+description = Utilities for importing WordPress blogs
+core = 7.x
+package = IS.com
+version = 7.x-1.1
+project = is_wordpress_migrate
+
+dependencies[] = date
+dependencies[] = is_vignette_migrate
+dependencies[] = migrate
+dependencies[] = wordpress_migrate
+
+files[] = is_wordpress_migrate.migrate.inc
+
+files[] = author.inc
+files[] = articlenews.inc

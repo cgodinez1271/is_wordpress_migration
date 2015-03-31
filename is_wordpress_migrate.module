@@ -1,0 +1,365 @@
+<?php
+/**
+ * @file
+ * WordPress migration.
+ */
+
+/**
+ * Look up the Season Number from a Season ID.
+ *
+ * @param int $season_id
+ *   The Season Id from WordPress Recaps.
+ *
+ * @return int
+ *   The season number.
+ */
+function is_wordpress_migrate_lookup_season_number_from_id($season_id) {
+  $result = db_query('SELECT season_number FROM {recap_seasons} WHERE season_id = :season_id', array(
+    ':season_id' => $season_id,
+  ));
+  return (int) $result->fetchColumn(0);
+}
+
+/**
+ * Map a WP Recap Episode Type to an Article Episode Type.
+ *
+ * @param int $recap_episode_type
+ *   The WordPress Recap Episode Type.
+ *
+ * @return int
+ *   Article Episode Type identifier.
+ * @throws Exception
+ *   Unknown recap episode type.
+ */
+function is_wordpress_migrate_recap_episode_type_to_int($recap_episode_type) {
+  if (!$recap_episode_type) {
+    return NULL;
+  }
+  $recap_episode_types = array(
+    // Season Premiere.
+    1192459 => 1,
+    // Season Finale.
+    304238 => 2,
+    // Series Premiere.
+    1670210 => 3,
+    // Series Finale.
+    1059404 => 4,
+  );
+  if (!isset($recap_episode_types[$recap_episode_type])) {
+    throw new Exception("Unknown Recap Episode Type '$recap_episode_type'");
+  }
+  return $recap_episode_types[$recap_episode_type];
+}
+
+/**
+ * Convert an episode type index to a human readable label.
+ *
+ * @param int $index
+ *   The index of the episode type.
+ *
+ * @return string
+ *   Name of the episode type.
+ * @throws Exception
+ *   Unknown episode ID.
+ */
+function is_wordpress_migrate_episode_type_id_to_name($index) {
+  if (!$index) {
+    return '';
+  }
+  $recap_episode_types = array(
+    1 => 'Season Premiere',
+    2 => 'Season Finale',
+    3 => 'Series Premiere',
+    4 => 'Series Finale',
+  );
+  if (!isset($recap_episode_types[$index])) {
+    throw new Exception("Unknown Recap Episode index '$index'");
+  }
+  return $recap_episode_types[$index];
+}
+
+/**
+ * Determine what to do with WP taxonomy terms.
+ *
+ * Supports renaming, taxonomy terms, Person and Creative Work content types.
+ *
+ * @param string $tag_value
+ *   The source value.
+ * @param string $blog_name
+ *   The source blog name. Will attempt some normalization.
+ *
+ * @return array
+ *   Keys include:
+ *     nid - NID of target node, if applicable
+ *     vocabulary - name of target vocabulary, if applicable
+ *     ignore - TRUE if record should be ignored.
+ *
+ * @throws MigrateException
+ *   If no rules are found for the lookup.
+ */
+function is_wordpress_migrate_taxonomy_to_drupal($tag_value, $blog_name) {
+  // Use this to throw exceptions on bad data.
+  $throw_exceptions = FALSE;
+
+  if (!$tag_value) {
+    return;
+  }
+
+  $sql_query = 'SELECT * ';
+  $sql_query .= 'FROM {migration_taxonomy_rules} ';
+  $sql_query .= 'WHERE source_term=:tag_value ';
+  $args = array(
+    ':tag_value' => $tag_value,
+  );
+  $result = db_query($sql_query, $args);
+  $record = $result->fetchObject();
+  if (!$record) {
+    $error = "ew_wordpress_migrate_taxonomy_to_drupal() - Unable to find '!tag_value' from '!blog_name' in migration_taxonomy_rules";
+    $replacements = array(
+      '!tag_value' => $tag_value,
+      '!blog_name' => $blog_name,
+    );
+    if ($throw_exceptions) {
+      throw new MigrateException(dt($error, $replacements));
+    }
+    else {
+      $record = new stdClass();
+      $record->ignore_term = TRUE;
+      watchdog('ew_wordpress_migrate', $error, $replacements);
+    }
+  }
+
+  $ret_val = array(
+    'ignore' => FALSE,
+    'nid' => 0,
+    'tag_value' => '',
+    'field_cw_type' => 0,
+    'type' => '',
+    'default' => FALSE,
+  );
+
+  if ($record->ignore_term) {
+    $ret_val['ignore'] = TRUE;
+    return $ret_val;
+  }
+
+  $ret_val['tag_value'] = $record->rename_term ? $record->rename_term : $tag_value;
+
+  if (!$ret_val['tag_value']) {
+    $ret_val['ignore'] = TRUE;
+    return $ret_val;
+  }
+
+  $node_args = array();
+
+  if ($record->person) {
+    $node_args['type'] = 'person';
+  }
+  elseif ($record->book) {
+    $node_args['type'] = 'creative_work';
+    $node_args['field_cw_type'] = 1;
+  }
+  elseif ($record->music) {
+    $node_args['type'] = 'creative_work';
+    $node_args['field_cw_type'] = 2;
+  }
+  elseif ($record->tv) {
+    $node_args['type'] = 'creative_work';
+    $node_args['field_cw_type'] = 3;
+  }
+  elseif ($record->movie) {
+    $node_args['type'] = 'creative_work';
+    $node_args['field_cw_type'] = 4;
+  }
+  elseif ($record->stage) {
+    $node_args['type'] = 'creative_work';
+    $node_args['field_cw_type'] = 5;
+  }
+  elseif ($record->video_game) {
+    $node_args['type'] = 'creative_work';
+    $node_args['field_cw_type'] = 6;
+  }
+  elseif ($record->web_series) {
+    $node_args['type'] = 'creative_work';
+    $node_args['field_cw_type'] = 7;
+  }
+
+  // Content type.
+  if (!empty($node_args)) {
+    $query = new EntityFieldQuery();
+    $query->entityCondition('entity_type', 'node')
+      ->propertyCondition('type', $node_args['type'])
+      ->propertyCondition('title', $ret_val['tag_value'])
+      ->propertyCondition('status', 1)
+      ->range(0, 1);
+
+    if (isset($node_args['field_cw_type'])) {
+      $query = $query->fieldCondition('field_cw_type', 'value', $node_args['field_cw_type']);
+    }
+
+    $entities = $query->execute();
+
+    if (!empty($entities['node'])) {
+      $node = node_load(array_shift(array_keys($entities['node'])));
+    }
+    else {
+      $node = new stdClass();
+      $node->title = $ret_val['tag_value'];
+      $node->type = $node_args['type'];
+      node_object_prepare($node);
+      if (isset($node_args['field_cw_type'])) {
+        $node->field_cw_type[LANGUAGE_NONE][0]['value'] = $node_args['field_cw_type'];
+      }
+      $node->status = 1;
+      $node->promote = 0;
+      $node->comment = 0;
+      $node->language = LANGUAGE_NONE;
+      $node->field_migrated[LANGUAGE_NONE][0]['value'] = 1;
+      $node->field_legacy_id[LANGUAGE_NONE][0]['value'] = $record->field_legacy_id;
+      $node = node_submit($node);
+      node_save($node);
+    }
+    $ret_val['nid'] = $node->nid;
+    $ret_val = array_merge($ret_val, $node_args);
+  }
+  // Vocabulary.
+  elseif ($record->taxonomy_genre) {
+    $ret_val['vocabulary'] = 'genre';
+  }
+  elseif ($record->taxonomy_ew_franchise) {
+    $ret_val['vocabulary'] = 'ew_franchise';
+  }
+  elseif ($record->taxonomy_franchise) {
+    $ret_val['vocabulary'] = 'franchise';
+  }
+  elseif ($record->taxonomy_event) {
+    $ret_val['vocabulary'] = 'event';
+  }
+  elseif ($record->taxonomy_freeform) {
+    $ret_val['vocabulary'] = 'freeform';
+  }
+  elseif ($record->taxonomy_category) {
+    $ret_val['vocabulary'] = 'category';
+  }
+  // No other options.
+  else {
+    if ($throw_exceptions) {
+      throw new MigrateException("ew_wordpress_migrate_taxonomy_to_drupal - no valid rules for '$tag_value' from '$blog_name' found! " . var_export($record, TRUE));
+    }
+    else {
+      $ret_val['vocabulary'] = 'freeform';
+      $ret_val['default'] = TRUE;
+    }
+  }
+
+  return $ret_val;
+}
+
+/**
+ * Get a blog name based on a path.
+ *
+ * @param string $path
+ *   The complete or partial path to the file to be imported.
+ *
+ * @return string
+ *   The normalized blog name.
+ */
+function is_wordpress_migrate_blog_name_from_path($path) {
+  $file_name = array_pop(array_slice(explode('/', $path), -2, 1));
+  $blog_name = current(explode('.', $file_name));
+
+  if (!$blog_name) {
+    return '';
+  }
+
+  if (substr($blog_name, 0, 2) == 'ew') {
+    $blog_name = substr($blog_name, 2);
+  }
+
+  // Normalization.
+  if ($blog_name == 'family') {
+    $blog_name = 'thefamilyroom';
+  }
+  elseif ($blog_name == 'news') {
+    $blog_name = 'newsbriefs';
+  }
+  elseif ($blog_name == 'themusicmix') {
+    $blog_name = 'musicmix';
+  }
+  elseif ($blog_name == 'kentucker039stv') {
+    $blog_name = 'watchingtv';
+  }
+
+  return $blog_name;
+}
+
+/**
+ * Get an index for a given blog name.
+ *
+ * @param string $blog_name
+ *   The machine name of the blog.
+ *
+ * @return int
+ *   The arbitrary index of the blog name.
+ * @throws MigrateException
+ *   If blog name isn't known.
+ */
+function is_wordpress_migrate_blog_name_index($blog_name) {
+  $names = array_keys(ew_feature_channel_subchannels());
+  $key = array_search($blog_name, $names);
+  if ($key === FALSE) {
+    throw new MigrateException('Unknown $blog_name "' . $blog_name . '"');
+  }
+  // Add one to the key so it is never 0.
+  $key++;
+  return $key;
+}
+
+/**
+ * Convert a WordPress blog name human readable label.
+ *
+ * @param string $blog_name
+ *   The machine name of the blog.
+ *
+ * @return string
+ *   Human readable name of the blog.
+ * @throws Exception
+ *   Unknown blog.
+ */
+function is_wordpress_migrate_blog_name_to_label($blog_name) {
+  // Mappings.
+  $names = ew_feature_channel_subchannels();
+
+  // Error checking.
+  if (!isset($names[$blog_name])) {
+    throw new Exception("Unknown WordPress blog name '$blog_name'");
+  }
+
+  // Success; return value.
+  return $names[$blog_name];
+}
+
+/**
+ * Look up the id of a rule for a given legacy term ID.
+ *
+ * @param int $legacy_id
+ *   The legacy term ID.
+ * @param string $source_type
+ *   category, tag
+ *
+ * @return int
+ *   The PK of the rule.
+ */
+function is_wordpress_migrate_term_legacy_to_id($legacy_id, $source_type) {
+  $sql_query = 'SELECT id FROM {migration_taxonomy_rules} ';
+  $sql_query .= 'WHERE field_legacy_id = :legacy_id ';
+  $sql_query .= 'AND source_type = :source_type ';
+  $result = db_query($sql_query, array(
+    ':legacy_id' => $legacy_id,
+    ':source_type' => $source_type,
+  ));
+  $ret_val = (int) $result->fetchColumn(0);
+  if ($ret_val) {
+    return $ret_val;
+  }
+}
