@@ -32,6 +32,14 @@ class ISWpArticleNewsMigration extends XMLMigration {
       'wp:is_sticky' => 'Equivalent to Drupal sticky flag',
       'category' => 'Categories (as nicename) assigned to this item',
 	  'wp:postmeta' => 'Are containers not been given their own WXR tags',
+	  'eyebrow_text'=> 'Prepare',
+	  'eyebrow_link'=> 'Prepare',
+	  'disable_flipboard'=> 'Prepare',
+	  'google_news_standout'=> 'Prepare',
+	  'native_advertiser' => 'Prepare',
+	  'status',=> 'Prepare: Drupal publish status'.
+	  'pubdate' => 'Prepare: drupal publish date'
+	  'urlalias' => 'Prepare: drupal url_alias'
     );
 
     // Map the source unique identifier for progress, rollbacks.
@@ -70,9 +78,14 @@ class ISWpArticleNewsMigration extends XMLMigration {
 		->xpath('title');
     $this->addFieldMapping('field_headline', 'title')
 		->xpath('title');
+    $this->addFieldMapping('field_legacy_url', 'link')
+		->xpath('link');
+    $this->addFieldMapping('field_legacy_id', 'wp:post_id')
+		->xpath('wp:post_id');
 
     #$this->addFieldMapping('field_authors', 'creator')
     #  ->callbacks('_ewVignetteAuthorToUid');
+
 	$this->addFieldMapping('field_edit_date', 'wp:post_date')
 		->xpath('wp:post_date');
 
@@ -81,13 +94,11 @@ class ISWpArticleNewsMigration extends XMLMigration {
     $this->addFieldMapping('body:format')
       ->defaultValue('full_html');
 
-    #$this->addFieldMapping('status', 'status')
-   	#   ->callbacks(array($this, 'wpPublishStatus'));
-
-    $this->addFieldMapping('field_legacy_url', 'link')
-		->xpath('link');
-    $this->addFieldMapping('field_legacy_id', 'wp:post_id')
-		->xpath('wp:post_id');
+    $this->addFieldMapping('field_eyebrow_text', 'eyebrow_text');
+    $this->addFieldMapping('field_eyebrow_link', 'eyebrow_link');
+    $this->addFieldMapping('field_disable_flipboard', 'disable_flipboard');
+    $this->addFieldMapping('field_google_news_standout', 'google_news_standout');
+    $this->addFieldMapping('field_native_advertiser', 'native_advertiser');
 
     $this->addUnmigratedSources(array(
       'guid',
@@ -113,39 +124,37 @@ class ISWpArticleNewsMigration extends XMLMigration {
    *   FALSE if the row should be skipped.
    */
   public function prepareRow($row) {
-	// drush_print_r($row);
 
 	#$wp_row = $row->xml->children($this->arguments['namespaces']['wp']);
 	#$content_row = $row->xml->children($this->arguments['namespaces']['content']);
-
 	$xml_data = $row->xml->children();
+
+	// skipe if there is not title
 	$row->title = (string) $xml_data->title;
-
-    if (!$row->xml->title) {
-      return FALSE;
+    if (!$row->title) {
+    	return FALSE;
     }
-
-	//$first_name = $this->xpathValue($row->xml->xpath('wp:author_first_name'));c
-	//foreach ($row->xml->components->field_images->field_image as $field_image) {}
-	foreach (this->xpathValue($row->xml->xpath('wp:postmeta')) as $postmeta) { 
-		drush_print_r($postmeta);	
+	// ONLY migrate publish or draft content
+	$status = $this->xpathValue($row->xml->xpath("wp:status")); 
+	if ($status == 'publish') {
+		$row->status = 1;
+	} else if ($status == 'draft') {
+		$row->status = 0;	
+	} else {
+		return FALSE;
 	}
-  }
 
-  /**
-   * Convert a WordPress publish status to Drupal.
-   *
-   * @param mixed $value
-   *   The value to be converted.
-   *
-   * @return int
-   *   Drupal status value.
-   */
-  protected function wpPublishStatus($value) {
-    if ($value == 'publish') {
-      return 1;
-    }
-    return 0;
+	$row->pubdate = $this->xpathValue($row->xml->xpath("pubDate"))
+	$row->urlalias = $this-xpathValue($row->xml-xpath("wp:post_name"));
+
+	$row->native_advertiser = $this->xpathValue($row->xml->xpath("category[@domain = 'sponsor' and @nicename]"));
+
+	$row->eyebrow_text = $this->xpathValue($row->xml->xpath("wp:postmeta[wp:meta_key = 'digital-issue-text']/wp:meta_value"));
+	$row->eyebrow_link = $this->xpathValue($row->xml->xpath("wp:postmeta[wp:meta_key = 'digital-issue-url']/wp:meta_value"));
+	$row->disable_flipboard = $this->xpathValue($row->xml->xpath("wp:postmeta[wp:meta_key = 'disable_flipboard']/wp:meta_value"));
+	$row->google_news_standout = $this->xpathValue($row->xml->xpath("wp:postmeta[wp:meta_key = 'post_standout_tag']/wp:meta_value"));
+
+	drush_print_r($row);
   }
 
   /**
@@ -158,14 +167,25 @@ class ISWpArticleNewsMigration extends XMLMigration {
    */
   public function complete($entity, stdClass $row) {
     if ($row->status) {
-      $state_data = new stdClass();
-      $state_data->vid = $entity->vid;
-      $state_data->nid = $entity->nid;
-      $state_data->state = 'published';
-      $state_data->timestamp = strtotime($row->post_date);
-      $state_data->status = 1;
-      drupal_write_record('node_revision_states', $state_data, array('vid'));
+    	$state_data = new stdClass();
+		$state_data->vid = $entity->vid;
+		$state_data->nid = $entity->nid;
+		$state_data->state = 'published';
+		$state_data->timestamp = strtotime($row->pubdate);
+		$state_data->status = 1;
+		drupal_write_record('node_revision_states', $state_data, array('vid'));
+		unset($state_data);
     }
+
+	if ($row->urlalias) {
+    	$state_data = new stdClass();
+		$state_data->pid = $entity->pid;
+		$state_data->source = 'node/' . $entity->nid;
+		$state_data->alias = $row->urlalias;
+		$state_data->language = 'und';
+      	drupal_write_record('url_alias', $state_data, array('pid'));
+		unset($state_data);
+	}
   }
 
   public function xpathValue($result) {

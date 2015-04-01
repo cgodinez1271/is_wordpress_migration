@@ -6,7 +6,6 @@ version = 7.x-1.1
 project = is_wordpress_migrate
 
 dependencies[] = date
-dependencies[] = is_vignette_migrate
 dependencies[] = migrate
 dependencies[] = wordpress_migrate
 
