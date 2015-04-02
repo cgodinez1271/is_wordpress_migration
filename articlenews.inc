@@ -151,7 +151,7 @@ class ISWpArticleNewsMigration extends XMLMigration {
 	$row->disable_flipboard = $this->xpathValue($row->xml->xpath("wp:postmeta[wp:meta_key = 'disable_flipboard']/wp:meta_value"));
 	$row->google_news_standout = $this->xpathValue($row->xml->xpath("wp:postmeta[wp:meta_key = 'post_standout_tag']/wp:meta_value"));
 
-	drush_print_r($row);
+	// drush_print_r($row);
   }
 
   /**
@@ -165,7 +165,7 @@ class ISWpArticleNewsMigration extends XMLMigration {
   public function complete($entity, stdClass $row) {
 
     if ($row->status) {
-		drush_print_r($row->status);
+		// drush_print_r($row->status);
     	$state_data = new stdClass();
 		$state_data->vid = $entity->vid;
 		$state_data->nid = $entity->nid;
@@ -177,7 +177,7 @@ class ISWpArticleNewsMigration extends XMLMigration {
 		unset($state_data);
     }
 	if ($row->urlalias) {
-		drush_print_r($row->urlalias);
+		// drush_print_r($row->urlalias);
     	$state_data = new stdClass();
 		$state_data->pid = $entity->pid;
 		$state_data->source = 'node/' . $entity->nid;
